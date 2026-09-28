@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>去AI味工具</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #ffffff; --text: #22201c; --muted: #7a756b;
+    --line: #e2ddd2; --accent: #c2572b; --accent-text: #ffffff; --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1a18; --card: #252320; --text: #ece8e0; --muted: #a39d92;
+      --line: #3a3732; --accent: #e07a4b; --accent-text: #1b1a18; --err: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.7 "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 24px; margin: 0; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; }
+  label { font-size: 14px; color: var(--muted); margin-bottom: 6px; display: block; }
+  textarea, input, select {
+    width: 100%; font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+  }
+  textarea { resize: vertical; min-height: 340px; flex: 1; }
+  #output { white-space: pre-wrap; min-height: 340px; flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow-wrap: anywhere; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  button {
+    font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .status { font-size: 14px; color: var(--muted); }
+  .status.err { color: var(--err); }
+  details { margin-top: 16px; }
+  summary { cursor: pointer; font-weight: 600; }
+  .settings { display: grid; gap: 12px; margin-top: 12px; }
+  #skill { min-height: 220px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  .hint { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>去AI味工具</h1>
+    <span class="sub">貼上文字 → 按「去AI味」→ 複製結果</span>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <label for="input">原文</label>
+      <textarea id="input" placeholder="把要改寫的文字貼在這裡…"></textarea>
+      <div class="row">
+        <button class="primary" id="run">去AI味</button>
+        <button id="stop" disabled>停止</button>
+        <span class="status" id="status"></span>
+      </div>
+    </div>
+    <div class="card">
+      <label>改寫結果</label>
+      <div id="output"></div>
+      <div class="row">
+        <button id="copy">複製結果</button>
+      </div>
+    </div>
+  </div>
+
+  <details id="settingsBox">
+    <summary>設定（API key、模型、去AI味規則）</summary>
+    <div class="settings">
+      <div>
+        <label for="apiKey">Anthropic API key</label>
+        <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off">
+        <div class="hint">只存在這台電腦的瀏覽器裡，不會傳到 Anthropic 以外的地方。到 console.anthropic.com 申請。</div>
+      </div>
+      <div>
+        <label for="model">模型</label>
+        <select id="model">
+          <option value="claude-opus-5">Claude Opus 5（品質最好）</option>
+          <option value="claude-sonnet-5">Claude Sonnet 5（較便宜）</option>
+          <option value="claude-haiku-4-5">Claude Haiku 4.5（最便宜、最快）</option>
+        </select>
+      </div>
+      <div>
+        <label for="skill">去AI味規則（你的 SKILL.md 內容）</label>
+        <textarea id="skill" placeholder="把你的去AI味 SKILL.md 內容貼在這裡，或用下面的按鈕載入檔案"></textarea>
+        <div class="row">
+          <input type="file" id="skillFile" accept=".md,.txt" style="width:auto">
+          <span class="hint">修改後會自動儲存</span>
+        </div>
+      </div>
+    </div>
+  </details>
+</main>
+
+<script type="text/plain" id="defaultSkill">
+---
+name: 去AI味
+description: 把讀起來像 AI 寫的中文改寫成像真人寫的。用在使用者貼一段文字並要求「去AI味」「改得像人寫的」「自然一點」的時候。
+---
+
+# 去AI味
+
+目標：讓文字讀起來像一個真實的台灣人自己寫的。保留原本的意思、事實、數字和重點，只改說法。不要新增原文沒有的資訊，也不要刪掉重要內容。用繁體中文、台灣慣用語。
+
+## 1. 刪掉制式轉折
+
+這些詞幾乎是 AI 的簽名，看到就刪或換掉：
+
+- 首先、其次、再者、此外、另外值得一提的是、最後
+- 總而言之、綜上所述、總的來說、總結來說
+- 值得注意的是、需要指出的是、不可否認的是
+- 在這個…的時代、隨著…的發展、在當今社會
+
+改法：大部分直接刪掉，句子照樣通。真的需要銜接時，用口語一點的詞，例如「還有」「不過」「所以」「說到底」，或者乾脆換段。
+
+## 2. 拆掉套話句型
+
+- 「不僅…更…」「不只是…而是…」→ 直接講重點那一半
+- 「這不僅是…更是…」→ 改成一句平實的描述
+- 「讓我們一起…」「一起來看看…吧」→ 刪掉
+- 「在…方面」「就…而言」→ 能刪就刪
+- 「扮演著重要的角色」「發揮關鍵作用」「具有重要意義」→ 講清楚到底做了什麼
+- 「賦能」「打造」「助力」「深耕」「全方位」「無縫」「一站式」→ 換成具體的動詞
+
+## 3. 打破工整排比
+
+AI 愛用三個一組、字數一樣的排比（「更快、更好、更省」「專業、貼心、用心」）。
+
+- 三連排比改成兩個，或只留一個最重要的
+- 句子長短要有變化，長句後面接一個短句
+- 不要每段都一樣長
+
+## 4. 少用條列
+
+原文是一段話能講完的內容，就寫成段落，不要硬拆成 1、2、3 或項目符號。只有真的是步驟、清單時才保留條列。拿掉多餘的粗體和小標題。
+
+## 5. 語氣降溫
+
+- 刪掉過度熱情的形容詞：非常、極其、十分、超級、完美、絕佳、令人驚艷
+- 刪掉客套開場和結尾：「希望這對你有幫助」「如果有任何問題歡迎隨時詢問」「感謝您的提問」
+- 刪掉空泛的正向結論：「相信未來一定會越來越好」「讓我們拭目以待」
+- 不要每句都在稱讚或鼓勵
+
+## 6. 講具體的話
+
+- 抽象說法換成具體例子、數字、場景
+- 「提升效率」→ 省下多少時間、少做哪一步
+- 「帶來更好的體驗」→ 使用者實際感受到什麼不同
+
+## 7. 像人說話
+
+- 可以有一點個人語氣和判斷，例如「我覺得」「老實說」「其實」，但不要每句都用
+- 標點自然：少用破折號「——」和分號，少用成對的引號強調
+- 用台灣口語：「蠻」「滿」「超」「欸」可以適度出現，但看原文場合，正式文件就不要
+
+## 輸出
+
+- 只給改寫後的文字，不加說明、不加「以下是改寫版本」
+- 保持原文的格式用途（貼文還是貼文、信件還是信件）
+- 長度跟原文差不多，通常會稍微短一點
+</script>
+
+<script type="module">
+import Anthropic from "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.128.0/+esm";
+
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+$("apiKey").value = store.get("deai.apiKey");
+$("model").value = store.get("deai.model") || "claude-opus-5";
+$("skill").value = store.get("deai.skill") || $("defaultSkill").textContent.trim();
+if (!$("apiKey").value) $("settingsBox").open = true;
+
+$("apiKey").addEventListener("input", (e) => store.set("deai.apiKey", e.target.value.trim()));
+$("model").addEventListener("change", (e) => store.set("deai.model", e.target.value));
+$("skill").addEventListener("input", (e) => store.set("deai.skill", e.target.value));
+$("skillFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $("skill").value = await file.text();
+  store.set("deai.skill", $("skill").value);
+  setStatus(`已載入規則：${file.name}`);
+});
+
+function setStatus(msg, isErr = false) {
+  $("status").textContent = msg;
+  $("status").className = "status" + (isErr ? " err" : "");
+}
+
+let stream = null;
+
+$("run").addEventListener("click", async () => {
+  const apiKey = $("apiKey").value.trim();
+  const skill = $("skill").value.trim();
+  const text = $("input").value.trim();
+  if (!apiKey) { $("settingsBox").open = true; return setStatus("請先在設定裡填 API key", true); }
+  if (!skill) { $("settingsBox").open = true; return setStatus("請先在設定裡貼上去AI味規則", true); }
+  if (!text) return setStatus("請先貼上原文", true);
+
+  const model = $("model").value;
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+  const params = {
+    model,
+    max_tokens: 64000,
+    system:
+      "你是一個文字改寫工具。依照下面的「去AI味」規則，改寫使用者給的文字。\n" +
+      "只輸出改寫後的文字本身，不要加任何開場白、說明或結尾。\n\n" +
+      "<去AI味規則>\n" + skill + "\n</去AI味規則>",
+    messages: [{ role: "user", content: text }],
+  };
+  // Opus 5: adaptive thinking + server-side fallback if a request is declined
+  if (model === "claude-opus-5") {
+    params.thinking = { type: "adaptive" };
+    params.betas = ["server-side-fallback-2026-07-01"];
+    params.fallbacks = "default";
+  }
+
+  $("output").textContent = "";
+  $("run").disabled = true;
+  $("stop").disabled = false;
+  setStatus("改寫中…");
+
+  try {
+    stream = model === "claude-opus-5"
+      ? client.beta.messages.stream(params)
+      : client.messages.stream(params);
+    stream.on("text", (delta) => { $("output").textContent += delta; });
+    const msg = await stream.finalMessage();
+    if (msg.stop_reason === "refusal") setStatus("模型拒絕處理這段文字", true);
+    else if (msg.stop_reason === "max_tokens") setStatus("輸出太長被截斷了", true);
+    else setStatus(`完成（輸入 ${msg.usage.input_tokens} / 輸出 ${msg.usage.output_tokens} tokens）`);
+  } catch (err) {
+    if (err instanceof Anthropic.APIUserAbortError) setStatus("已停止");
+    else if (err instanceof Anthropic.AuthenticationError) setStatus("API key 無效，請檢查設定", true);
+    else if (err instanceof Anthropic.RateLimitError) setStatus("請求太頻繁，稍等一下再試", true);
+    else if (err instanceof Anthropic.APIError) setStatus(`API 錯誤（${err.status ?? "連線"}）：${err.message}`, true);
+    else setStatus(`錯誤：${err.message}`, true);
+  } finally {
+    stream = null;
+    $("run").disabled = false;
+    $("stop").disabled = true;
+  }
+});
+
+$("stop").addEventListener("click", () => stream?.abort());
+
+$("copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("output").textContent);
+    setStatus("已複製");
+  } catch {
+    setStatus("複製失敗，請手動選取", true);
+  }
+});
+</script>
+</body>
+</html>
