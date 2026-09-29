@@ -8,11 +8,13 @@
   :root {
     --bg: #f6f4ef; --card: #ffffff; --text: #22201c; --muted: #7a756b;
     --line: #e2ddd2; --accent: #c2572b; --accent-text: #ffffff; --err: #b3261e;
+    --del: #b3261e; --ins: #1e7a3c; --ai: #fbe7a1;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #1b1a18; --card: #252320; --text: #ece8e0; --muted: #a39d92;
       --line: #3a3732; --accent: #e07a4b; --accent-text: #1b1a18; --err: #ff8a80;
+      --del: #ff8a80; --ins: #7fd49a; --ai: #5c4a14;
     }
   }
   * { box-sizing: border-box; }
@@ -48,6 +50,19 @@
   .settings { display: grid; gap: 12px; margin-top: 12px; }
   #skill { min-height: 220px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
   .hint { font-size: 13px; color: var(--muted); }
+  .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .head label { margin: 0; }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button { padding: 3px 10px; font-size: 13px; }
+  .tabs button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  #diff { white-space: pre-wrap; min-height: 340px; flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow-wrap: anywhere; }
+  #diff del { color: var(--del); text-decoration: line-through; }
+  #diff ins { color: var(--ins); text-decoration: underline; text-underline-offset: 3px; }
+  #diff .ai { background: var(--ai); border-radius: 3px; }
+  #aiFound, #aiSummary { margin-top: 8px; }
+  .legend del { color: var(--del); }
+  .legend ins { color: var(--ins); text-decoration: underline; }
+  .legend .ai { background: var(--ai); border-radius: 3px; padding: 0 3px; }
 </style>
 </head>
 <body>
@@ -61,6 +76,7 @@
     <div class="card">
       <label for="input">原文</label>
       <textarea id="input" placeholder="把要改寫的文字貼在這裡…"></textarea>
+      <div class="hint" id="aiFound"></div>
       <div class="row">
         <button class="primary" id="run">去AI味</button>
         <button id="stop" disabled>停止</button>
@@ -68,8 +84,17 @@
       </div>
     </div>
     <div class="card">
-      <label>改寫結果</label>
+      <div class="head">
+        <label>改寫結果</label>
+        <div class="tabs">
+          <button id="tabResult" class="active">結果</button>
+          <button id="tabDiff">前後對照</button>
+        </div>
+      </div>
       <div id="output"></div>
+      <div id="diff" hidden></div>
+      <div class="hint legend" id="legend" hidden><del>刪掉的</del>　<ins>新加的</ins>　<span class="ai">AI 詞</span></div>
+      <div class="hint" id="aiSummary"></div>
       <div class="row">
         <button id="copy">複製結果</button>
       </div>
@@ -202,6 +227,145 @@ function setStatus(msg, isErr = false) {
   $("status").className = "status" + (isErr ? " err" : "");
 }
 
+// ---- AI 詞偵測 ----
+// 字串 = 固定詞；[標籤, 正規式] = 句型。刻意不收「非常」「最後」這類太常見、誤判多的詞。
+const AI_PATTERNS = [
+  "另外值得一提的是", "值得一提的是", "首先", "其次", "再者", "此外",
+  "總而言之", "綜上所述", "總的來說", "總結來說",
+  "值得注意的是", "需要指出的是", "不可否認的是", "在當今社會",
+  ["在這個…的時代", "在這個.{1,12}?的時代"], ["隨著…的發展", "隨著.{1,15}?的發展"],
+  ["不僅…更…", "不僅.{1,20}?更"], ["不只是…而是…", "不只是.{1,20}?而是"],
+  "讓我們一起", "一起來看看",
+  ["扮演重要角色", "扮演著?(?:重要|關鍵)的?角色"], "發揮關鍵作用", "具有重要意義",
+  "賦能", "打造", "助力", "深耕", "全方位", "無縫", "一站式",
+  "極其", "絕佳", "令人驚艷",
+  "希望這對你有幫助", ["歡迎隨時詢問", "如果有任何問題.{0,6}?歡迎隨時.{0,4}?(?:詢問|聯繫|聯絡)"],
+  "感謝您的提問", "相信未來一定會越來越好", "讓我們拭目以待",
+].map((p) => typeof p === "string"
+  ? [p, p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")]
+  : p);
+const AI_RE = new RegExp(AI_PATTERNS.map(([, src]) => `(${src})`).join("|"), "g");
+
+function findAI(text) {
+  const hits = [];
+  for (const m of text.matchAll(AI_RE)) {
+    const k = m.findIndex((g, i) => i > 0 && g !== undefined) - 1;
+    hits.push({ start: m.index, end: m.index + m[0].length, label: AI_PATTERNS[k][0] });
+  }
+  return hits;
+}
+
+function describeAI(hits) {
+  const counts = new Map();
+  for (const h of hits) counts.set(h.label, (counts.get(h.label) || 0) + 1);
+  return [...counts].map(([w, n]) => (n > 1 ? `${w}×${n}` : w)).join("、");
+}
+
+function updateAIFound() {
+  const hits = findAI($("input").value);
+  $("aiFound").textContent = hits.length ? `偵測到 ${hits.length} 個 AI 詞：${describeAI(hits)}` : "";
+}
+$("input").addEventListener("input", updateAIFound);
+
+// ---- 前後對照（以字為單位的 LCS diff，英文單字和空白整段算一個單位）----
+const tokenize = (s) => s.match(/[A-Za-z0-9_]+|\s+|[\s\S]/gu) || [];
+
+function diffTokens(a, b) {
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let s = 0;
+  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  const A = a.slice(p, a.length - s), B = b.slice(p, b.length - s);
+  const n = A.length, m = B.length, W = m + 1;
+  if ((n + 1) * W > 25e6) return null; // 太長，表格會吃太多記憶體
+  const L = new Uint16Array((n + 1) * W);
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      L[i * W + j] = A[i] === B[j] ? L[(i + 1) * W + j + 1] + 1 : Math.max(L[(i + 1) * W + j], L[i * W + j + 1]);
+
+  // ops: [type, token 索引（del/eq 是原文的，ins 是改寫後的）, 文字]
+  const ops = [];
+  for (let k = 0; k < p; k++) ops.push(["eq", k, a[k]]);
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { ops.push(["eq", p + i, A[i]]); i++; j++; }
+    else if (L[(i + 1) * W + j] >= L[i * W + j + 1]) { ops.push(["del", p + i, A[i]]); i++; }
+    else { ops.push(["ins", p + j, B[j]]); j++; }
+  }
+  for (; i < n; i++) ops.push(["del", p + i, A[i]]);
+  for (; j < m; j++) ops.push(["ins", p + j, B[j]]);
+  for (let k = a.length - s; k < a.length; k++) ops.push(["eq", k, a[k]]);
+  return ops;
+}
+
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+function renderDiff(before, after) {
+  const a = tokenize(before), b = tokenize(after);
+  const ops = diffTokens(a, b);
+  if (!ops) return `<span class="status err">文字太長，沒辦法做前後對照。</span>`;
+
+  // 每個 token 是否屬於 AI 詞
+  const tokenAI = (tokens, text) => {
+    const mask = new Uint8Array(text.length);
+    for (const h of findAI(text)) {
+      // 句型（標籤含「…」）只標頭尾的關鍵字，中間的內容不算 AI 詞
+      const parts = h.label.split("…");
+      if (parts.length === 1) { mask.fill(1, h.start, h.end); continue; }
+      const head = parts[0], tail = parts.filter(Boolean).at(-1);
+      mask.fill(1, h.start, h.start + head.length);
+      if (tail !== head) mask.fill(1, h.end - tail.length, h.end);
+    }
+    let pos = 0;
+    return tokens.map((t) => { const v = mask[pos]; pos += t.length; return v; });
+  };
+  const aiA = tokenAI(a, before), aiB = tokenAI(b, after);
+
+  let html = "", curKey = null, buf = "";
+  const flush = () => {
+    if (!buf) return;
+    const [type, ai] = curKey.split(":");
+    const cls = ai === "1" ? ' class="ai"' : "";
+    const tag = type === "del" ? "del" : type === "ins" ? "ins" : "span";
+    html += `<${tag}${cls}>${esc(buf)}</${tag}>`;
+    buf = "";
+  };
+  for (const [type, idx, text] of ops) {
+    const ai = (type === "ins" ? aiB : aiA)[idx] ? 1 : 0;
+    const key = `${type}:${ai}`;
+    if (key !== curKey) { flush(); curKey = key; }
+    buf += text;
+  }
+  flush();
+  return html;
+}
+
+let lastInput = "";
+let view = "result";
+
+function showView(v) {
+  view = v;
+  $("tabResult").classList.toggle("active", v === "result");
+  $("tabDiff").classList.toggle("active", v === "diff");
+  $("output").hidden = v !== "result";
+  $("diff").hidden = $("legend").hidden = v !== "diff";
+  if (v === "diff") {
+    $("diff").innerHTML = $("output").textContent
+      ? renderDiff(lastInput, $("output").textContent)
+      : `<span class="hint">改寫完成後，這裡會顯示改了哪些地方。</span>`;
+  }
+}
+$("tabResult").addEventListener("click", () => showView("result"));
+$("tabDiff").addEventListener("click", () => showView("diff"));
+
+function updateAISummary() {
+  const before = findAI(lastInput), after = findAI($("output").textContent);
+  if (!before.length && !after.length) { $("aiSummary").textContent = ""; return; }
+  $("aiSummary").textContent =
+    `AI 詞：原文 ${before.length} 個 → 改寫後 ${after.length} 個` +
+    (after.length ? `（還留著：${describeAI(after)}）` : "");
+}
+
 let stream = null;
 
 $("run").addEventListener("click", async () => {
@@ -230,7 +394,10 @@ $("run").addEventListener("click", async () => {
     params.fallbacks = "default";
   }
 
+  lastInput = text;
   $("output").textContent = "";
+  $("aiSummary").textContent = "";
+  showView("result");
   $("run").disabled = true;
   $("stop").disabled = false;
   setStatus("改寫中…");
@@ -252,6 +419,7 @@ $("run").addEventListener("click", async () => {
     else setStatus(`錯誤：${err.message}`, true);
   } finally {
     stream = null;
+    updateAISummary();
     $("run").disabled = false;
     $("stop").disabled = true;
   }
