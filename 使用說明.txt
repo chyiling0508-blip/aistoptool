@@ -20,3 +20,9 @@
 - skill 已裝在 C:\Users\chyil\.claude\skills\de-ai\SKILL.md
 - 打 /de-ai 或直接說「幫我去AI味」就會套用。
 - 改了這個資料夾的 SKILL.md 之後，要記得也更新那一份（name 那行要保持 de-ai）。
+
+在本機伺服器開啟
+- 雙擊桌面上的「開啟去AI味小工具.bat」，瀏覽器會打開 http://localhost:8780/
+- 伺服器就是那個黑色視窗，關掉就停止。
+- bat 要跟「去AI味小工具」資料夾放在同一層（bat 內容就一行：
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0去AI味小工具\serve.ps1"）
